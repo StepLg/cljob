@@ -1,0 +1,102 @@
+#!/usr/bin/env python
+
+import sys
+from optparse import OptionParser, OptionGroup
+
+from cljob.opts import make_host_options,      \
+                       make_output_options,    \
+                       parse_host_cmd_options, \
+                       make_output_handlers,   \
+                       get_default_dir
+
+from cljob.job import ShellJob, job_path
+from cljob import handler, rsh
+
+def main():
+    optparser = OptionParser(usage="""
+    %prog HOST_OPTIONS [OPTIONS] [DEFAULT_CMD]
+        Run commands on hosts with working dirs from HOST_OPTIONS.
+
+Individual commands for hosts could be written in -T option file or
+to stdin in --streaming mode. All host options accept not only hosts,
+but optional working dir too (for example, ws1-400:some/working/dir).""")
+
+    host_options = OptionGroup(optparser, "Host options")
+    host_options.add_options(make_host_options())
+    host_options.set_description("""In additinal to host, in trsh_run you can
+specify working dir with semicolumn, for
+example: ws1-400:relative/to/default/dir or ws1-400:/abs/path. In --hosts file
+and in streaming mode trsh_run parse option second tab-separated field, expecting
+individual command for this host:path.
+
+Also multiply paths for one host are allowed. All commands are executed in
+parallel, so if you need sequential execution - use different trsh_run calls.
+    """)
+    optparser.add_option_group(host_options)
+
+    output_options = OptionGroup(optparser, "Output options")
+    output_options.add_options(make_output_options())
+    output_options.add_option('--no-merge-out', dest='merge_out',         \
+                              action='store_false', default=True,         \
+                              help='do not merge cmds output by text')
+    output_options.add_option('--max-jobs-out', dest='max_jobs_out',    \
+                              action='store', default=5, type='int',      \
+                              help='maximum number of jobs to output in  \
+                                    merged output. If <0 then there is no \
+                                    limit')
+    optparser.add_option_group(output_options)
+    optparser.add_option('-w', '--working-dir', dest='working_dir', \
+                         metavar='REMOTE_DIR', type='string',       \
+                         default='', help='default remote working dir')
+    optparser.add_option('--streaming', dest='streaming', action='store_true', default=False, \
+                         help='read host paths with cmds from stdin')
+    rsh_options = OptionGroup(optparser, "Rsh options")
+    rsh_options.add_options(rsh.make_options())
+    optparser.add_option_group(rsh_options)
+    options, args = optparser.parse_args(sys.argv[1:])
+    cmd = None
+    if len(args) > 0:
+        cmd = ' '.join(args)
+
+    if options.timeout < 0:
+        optparser.error("Timeout can't be negative")
+
+    if options.streaming:
+        options.file_hosts.append(sys.stdin)
+
+    options.working_dir = get_default_dir(options.working_dir)
+
+    hosts = parse_host_cmd_options(options, options.working_dir, cmd)
+
+    if hosts == None:
+        optparser.error("You need to specify hosts to run.")
+
+    jobs = []
+    for host, paths in hosts.iteritems():
+        for wdir, cmd in paths.iteritems():
+            jobs.append(ShellJob(host, cmd, wdir))
+
+    if options.quiet or not options.merge_err or not options.merge_out:
+        options.pbar = False
+
+    handlers = make_output_handlers(options, jobs)
+    if not options.quiet:
+        args = {
+            'job_to_str_func': job_path,
+            'max_jobs_num': options.max_jobs_out,
+        }
+        if options.merge_out:
+            handlers.append(handler.MergeOutput(**args))
+        elif not options.quiet:
+            handlers.append(handler.PrintOutput(**args))
+
+    for job in rsh.run_shell_jobs(jobs, **rsh.parse_options(options)):
+        for hnd in handlers:
+            hnd(job)
+
+    for hnd in handlers:
+        if 'finish' in dir(hnd):
+            hnd.finish()
+
+if __name__ == '__main__':
+    main()

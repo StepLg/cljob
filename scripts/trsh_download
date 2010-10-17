@@ -1,0 +1,78 @@
+#!/usr/bin/env python
+
+import sys
+from os import listdir
+import os.path
+from optparse import OptionParser, OptionGroup
+from progressbar import ProgressBar
+
+from cljob.opts import make_host_options,    \
+                       make_output_options,  \
+                       parse_host_options,   \
+                       make_output_handlers, \
+                       get_default_dir
+
+from cljob import rsh
+from cljob.job import DownloadJob
+
+def main():
+    optparser = OptionParser(usage="""
+    """)
+
+    host_options = OptionGroup(optparser, "Host options")
+    host_options.add_options(make_host_options())
+    optparser.add_option_group(host_options)
+    output_options = OptionGroup(optparser, "Output options")
+    output_options.add_options(make_output_options())
+    optparser.add_option_group(output_options)
+    rsh_options = OptionGroup(optparser, "Rsh options")
+    rsh_options.add_options(rsh.make_options())
+    optparser.add_option_group(rsh_options)
+
+    optparser.add_option('-b', '--base-dir', dest='base_dir', \
+                         action='store', metavar='DIR', default='', \
+                         help='default base dir on remote hosts')
+    optparser.add_option('--path-suffix', dest='path_suffix', \
+                         default=False, action='store_true', \
+                         help='append to host last path part from downloading dir name')
+
+    options, args = optparser.parse_args(sys.argv[1:])
+    if len(args) < 2:
+        optparser.error("You need to specify list of files and target dir.")
+
+    target = args[len(args)-1]
+    files = args[:-1]
+
+    options.base_dir = get_default_dir(options.base_dir)
+    hosts = parse_host_options(options, options.base_dir)
+    if hosts == None:
+        optparser.error("Need to set host options.")
+
+    if len(hosts) == 0:
+        optparser.error("Empty hosts list.")
+
+    jobs = []
+    all_targets = set()
+    for host, paths in hosts.iteritems():
+        for base_dir in paths:
+            cur_target = os.path.join(target, host)
+            if options.path_suffix:
+                cur_target += ':%s' % os.path.basename(base_dir)
+            if cur_target in all_targets:
+                optparser.error("Duplicate target dir '%s'." % cur_target)
+            if not os.path.isdir(cur_target):
+                os.makedirs(cur_target)
+            jobs.append(DownloadJob(host, files, cur_target, base_dir = base_dir))
+
+    handlers = make_output_handlers(options, jobs)
+
+    for job in rsh.run_download_jobs(jobs, **rsh.parse_options(options)):
+        for hnd in handlers:
+            hnd(job)
+
+    for hnd in handlers:
+        if 'finish' in dir(hnd):
+            hnd.finish()
+
+if __name__ == '__main__':
+    main()
