@@ -30,7 +30,7 @@ def main():
             continue
         for ipath in paths:
             for epath in ehpaths[host]:
-                if fnmatch(ipath, epath):
+                if epath == '*' or fnmatch(ipath, epath):
                     excluded += 1
                     break
 
