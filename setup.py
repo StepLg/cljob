@@ -7,5 +7,5 @@ setup(
     name='cljob',
     version='0.1-dev',
     packages=['cljob'],
-    scripts=glob('scripts/trsh*') + ['scripts/tcheck_fails']
+    scripts=glob('./trsh*') + ['./tcheck_fails']
 )
