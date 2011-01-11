@@ -19,8 +19,8 @@ def main():
     if len(args) != 2:
         optparser.error("Need to specify initial host paths file and failed host paths file.")
 
-    ihpaths = parse_host_paths_file(args[0], None)
-    ehpaths = parse_host_paths_file(args[1], None)
+    ihpaths = parse_host_paths_file(args[0], '')
+    ehpaths = parse_host_paths_file(args[1], '')
 
     all_hpaths = 0
     excluded = 0
@@ -30,7 +30,7 @@ def main():
             continue
         for ipath in paths:
             for epath in ehpaths[host]:
-                if fnmatch(ipath, epath):
+                if epath == '*' or fnmatch(ipath, epath):
                     excluded += 1
                     break
 
